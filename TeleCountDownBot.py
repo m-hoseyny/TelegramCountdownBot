@@ -79,37 +79,67 @@ def extract_message_info(message_link):
     
     return chat_id, message_id
 
-def remaining_time_from_timestamp(target_timestamp):
-    current_time = datetime.now()
-    target_time = datetime.fromtimestamp(target_timestamp)
-    
-    remaining_time = target_time - current_time
-    
-    if remaining_time.total_seconds() <= 0:
+def to_persian_numbers(number):
+    """Convert English numbers to Persian numbers"""
+    persian_numbers = {
+        '0': '۰',
+        '1': '۱',
+        '2': '۲',
+        '3': '۳',
+        '4': '۴',
+        '5': '۵',
+        '6': '۶',
+        '7': '۷',
+        '8': '۸',
+        '9': '۹'
+    }
+    return ''.join(persian_numbers.get(digit, digit) for digit in str(number))
+
+def calculate_time_components(remaining_seconds):
+    """Calculate days, hours, minutes, and seconds from total seconds"""
+    if remaining_seconds <= 0:
         return None
+        
+    days = int(remaining_seconds // (24 * 3600))
+    remaining_seconds = remaining_seconds % (24 * 3600)
+    hours = int(remaining_seconds // 3600)
+    remaining_seconds %= 3600
+    minutes = int(remaining_seconds // 60)
+    seconds = int(remaining_seconds % 60)
     
-    remaining_days = remaining_time.days
-    remaining_hours, remainder = divmod(remaining_time.seconds, 3600)
-    remaining_minutes, remaining_seconds = divmod(remainder, 60)
+    return (
+        to_persian_numbers(days),
+        to_persian_numbers(hours),
+        to_persian_numbers(minutes),
+        to_persian_numbers(seconds)
+    )
+
+def remaining_time_from_timestamp(target_timestamp):
+    """Calculate remaining time from target timestamp"""
+    current_time = time.time()
+    remaining_seconds = target_timestamp - current_time
     
-    return remaining_days, remaining_hours, remaining_minutes, remaining_seconds
+    if remaining_seconds <= 0:
+        return None
+        
+    return remaining_seconds
 
 def format_countdown_message(remaining_time, template):
+    """Format countdown message with Persian numbers"""
     if remaining_time is None:
-        return " زمان به پایان رسید!"
+        return "زمان به پایان رسید!"
         
-    days, hours, minutes, seconds = remaining_time
+    time_components = calculate_time_components(remaining_time)
+    if time_components is None:
+        return "زمان به پایان رسید!"
+        
+    days, hours, minutes, seconds = time_components
     return template.format(
         days=days,
         hours=hours,
         minutes=minutes,
         seconds=seconds
     )
-
-def get_countdown_data(countdown_key):
-    """Get countdown data from JSON file"""
-    countdowns = load_countdowns()
-    return countdowns.get(countdown_key)
 
 async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_key: str) -> None:
     """Update a single countdown message"""
@@ -362,6 +392,11 @@ async def handle_template(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(" عملیات لغو شد.")
     return ConversationHandler.END
+
+def get_countdown_data(countdown_key):
+    """Get countdown data from JSON file"""
+    countdowns = load_countdowns()
+    return countdowns.get(countdown_key)
 
 def main() -> None:
     logger.info("Starting bot...")
