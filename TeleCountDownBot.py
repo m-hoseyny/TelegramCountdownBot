@@ -147,7 +147,8 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
                     parse_mode='HTML'
                 )
         except Exception as e:
-            if "no text in the message to edit" in str(e):
+            error_msg = str(e).lower()
+            if "no text in the message to edit" in error_msg:
                 # Update the countdown data to mark it as a caption message
                 countdowns = load_countdowns()
                 if countdown_key in countdowns:
@@ -160,6 +161,23 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
                     caption=message_text,
                     parse_mode='HTML'
                 )
+            elif "message to edit not found" in error_msg:
+                logger.warning(f"Message not found for countdown {countdown_key}, removing from database")
+                # Remove the countdown from JSON
+                countdowns = load_countdowns()
+                if countdown_key in countdowns:
+                    del countdowns[countdown_key]
+                    save_countdowns(countdowns)
+                # Remove the job
+                remove_countdown(context.application, countdown_key)
+                # Notify admin
+                if admin_chat_id:
+                    await context.bot.send_message(
+                        chat_id=admin_chat_id,
+                        text=f"پیام شمارش معکوس پیدا نشد یا پاک شده است. شمارش معکوس متوقف شد.\nشناسه پیام: {countdown_key}",
+                        parse_mode='HTML'
+                    )
+                return
             else:
                 raise  # Re-raise if it's a different error
         
@@ -179,7 +197,8 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
             if admin_chat_id:
                 await context.bot.send_message(
                     chat_id=admin_chat_id,
-                    text=f" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است. \n{e}"
+                    text=f" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است. \n{e}",
+                    parse_mode='HTML'
                 )
         except Exception as notify_error:
             logger.error(f"Failed to notify admin about error: {notify_error}")
@@ -246,7 +265,7 @@ async def handle_message_link(update: Update, context: ContextTypes.DEFAULT_TYPE
             "لطفاً تاریخ و زمان پایان را به صورت شمسی وارد کنید:\n"
             "فرمت: YYYY-MM-DD HH:MM:SS\n"
             "مثال:\n"
-            "<code>1402-12-29 23:59:59</code>",
+            "<code>1403-12-29 23:59:59</code>",
             parse_mode='HTML'
         )
         return WAITING_FOR_TIME
