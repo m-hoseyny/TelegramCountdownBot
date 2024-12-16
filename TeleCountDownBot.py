@@ -10,6 +10,15 @@ import os
 # Conversation states
 WAITING_FOR_LINK = 1
 WAITING_FOR_TIME = 2
+WAITING_FOR_TEMPLATE = 3
+
+# Template placeholders
+TEMPLATE_PLACEHOLDERS = {
+    "{days}": "تعداد روز",
+    "{hours}": "تعداد ساعت",
+    "{minutes}": "تعداد دقیقه",
+    "{seconds}": "تعداد ثانیه"
+}
 
 # JSON file to store countdown data
 DB_FILE = 'countdowns.json'
@@ -55,19 +64,24 @@ def remaining_time_from_timestamp(target_timestamp):
     
     return remaining_days, remaining_hours, remaining_minutes, remaining_seconds
 
-def format_countdown_message(remaining_time):
+def format_countdown_message(remaining_time, template):
     if remaining_time is None:
         return " زمان به پایان رسید!"
         
     days, hours, minutes, seconds = remaining_time
-    return f"زمان باقی مانده: {days} روز, {hours} ساعت, {minutes} دقیقه, {seconds} ثانیه"
+    return template.format(
+        days=days,
+        hours=hours,
+        minutes=minutes,
+        seconds=seconds
+    )
 
-async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, target_timestamp: float) -> None:
+async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, target_timestamp: float, template: str) -> None:
     countdown_key = f"{chat_id}_{message_id}"
     
     try:
         remaining_time = remaining_time_from_timestamp(target_timestamp)
-        message_text = format_countdown_message(remaining_time)
+        message_text = format_countdown_message(remaining_time, template)
         
         await context.bot.edit_message_text(
             chat_id=chat_id,
@@ -106,7 +120,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: i
         for job in current_jobs:
             job.schedule_removal()
 
-def create_countdown_job(application: Application, chat_id: int, message_id: int, target_timestamp: float) -> None:
+def create_countdown_job(application: Application, chat_id: int, message_id: int, target_timestamp: float, template: str) -> None:
     """Create a new job for a countdown"""
     countdown_key = f"{chat_id}_{message_id}"
     
@@ -117,7 +131,7 @@ def create_countdown_job(application: Application, chat_id: int, message_id: int
     
     # Create new job
     application.job_queue.run_repeating(
-        callback=lambda context: update_single_countdown(context, chat_id, message_id, target_timestamp),
+        callback=lambda context: update_single_countdown(context, chat_id, message_id, target_timestamp, template),
         interval=10,  # Update every 10 seconds
         first=1,  # Start after 1 second
         name=countdown_key
@@ -131,8 +145,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "2️⃣ من را به عنوان ادمین کانال تنظیم کنید\n"
         "3️⃣ یک پیام در کانال ارسال کنید و لینک پیام را کپی کنید\n"
         "4️⃣ دستور /add_countdown را ارسال کنید و لینک پیام را برای من بفرستید\n"
-        "5️⃣ زمان پایان را به صورت تاریخ شمسی وارد کنید\n\n"
-        "مثال تاریخ: 1402-12-29 23:59:59"
+        "5️⃣ زمان پایان را به صورت تاریخ شمسی وارد کنید\n"
+        "6️⃣ قالب پیام را با استفاده از متغیرهای زیر وارد کنید:\n\n"
+        f"{', '.join(TEMPLATE_PLACEHOLDERS.keys())}\n\n"
+        "مثال تاریخ: 1402-12-29 23:59:59\n"
+        "مثال قالب پیام: {days} روز و {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه تا شروع مسابقه"
     )
     await update.message.reply_text(instructions)
 
@@ -172,22 +189,16 @@ async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE)
         target_time = JalaliDateTime(year, month, day, hour, minute, second).to_gregorian()
         target_timestamp = target_time.timestamp()
         
-        chat_id, message_id = context.user_data['message_info']
-        countdown_key = f"{chat_id}_{message_id}"
+        context.user_data['target_timestamp'] = target_timestamp
         
-        # Save to JSON
-        countdowns = load_countdowns()
-        countdowns[countdown_key] = {
-            'chat_id': chat_id,
-            'message_id': message_id,
-            'target_timestamp': target_timestamp
-        }
-        save_countdowns(countdowns)
-        
-        # Create countdown job
-        create_countdown_job(context.application, chat_id, message_id, target_timestamp)
-        
-        await update.message.reply_text(" شمارش معکوس با موفقیت شروع شد!")
+        # Ask for message template
+        await update.message.reply_text(
+            "لطفاً قالب پیام را وارد کنید. از متغیرهای زیر استفاده کنید:\n"
+            f"{', '.join(TEMPLATE_PLACEHOLDERS.keys())}\n\n"
+            "مثال:\n"
+            "{days} روز و {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه تا شروع مسابقه"
+        )
+        return WAITING_FOR_TEMPLATE
         
     except Exception as e:
         await update.message.reply_text(
@@ -195,6 +206,52 @@ async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "مثال صحیح: 1402-12-29 23:59:59"
         )
         return WAITING_FOR_TIME
+
+async def handle_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    template = update.message.text.strip()
+    
+    # Verify template contains all required placeholders
+    missing_placeholders = []
+    for placeholder in TEMPLATE_PLACEHOLDERS.keys():
+        if placeholder not in template:
+            missing_placeholders.append(f"{placeholder} ({TEMPLATE_PLACEHOLDERS[placeholder]})")
+    
+    if missing_placeholders:
+        await update.message.reply_text(
+            " قالب پیام باید شامل تمام متغیرها باشد. موارد زیر در پیام شما وجود ندارند:\n"
+            f"{', '.join(missing_placeholders)}\n\n"
+            "لطفاً دوباره تلاش کنید یا /cancel را بزنید."
+        )
+        return WAITING_FOR_TEMPLATE
+    
+    try:
+        # Test template formatting
+        test_format = template.format(days=0, hours=0, minutes=0, seconds=0)
+        
+        chat_id, message_id = context.user_data['message_info']
+        target_timestamp = context.user_data['target_timestamp']
+        countdown_key = f"{chat_id}_{message_id}"
+        
+        # Save to JSON
+        countdowns = load_countdowns()
+        countdowns[countdown_key] = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'target_timestamp': target_timestamp,
+            'template': template
+        }
+        save_countdowns(countdowns)
+        
+        # Create countdown job
+        create_countdown_job(context.application, chat_id, message_id, target_timestamp, template)
+        
+        await update.message.reply_text(" شمارش معکوس با موفقیت شروع شد!")
+        
+    except Exception as e:
+        await update.message.reply_text(
+            " قالب پیام نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید."
+        )
+        return WAITING_FOR_TEMPLATE
     
     return ConversationHandler.END
 
@@ -214,6 +271,7 @@ def main() -> None:
         states={
             WAITING_FOR_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_link)],
             WAITING_FOR_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_target_time)],
+            WAITING_FOR_TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_template)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )
@@ -228,7 +286,8 @@ def main() -> None:
         chat_id = data['chat_id']
         message_id = data['message_id']
         target_timestamp = data['target_timestamp']
-        create_countdown_job(application, chat_id, message_id, target_timestamp)
+        template = data.get('template', "زمان باقی مانده:\n<code>{days} روز, {hours} ساعت, {minutes} دقیقه, {seconds} ثانیه</code>")
+        create_countdown_job(application, chat_id, message_id, target_timestamp, template)
     
     # Start the bot
     print("Starting bot...")
