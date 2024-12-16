@@ -6,6 +6,7 @@ services:
     container_name: telegram-countdown-bot
     environment:
       - TOKEN=${TOKEN}  # Telegram bot token from environment variable
+      - UPDATE_INTERVAL=${UPDATE_INTERVAL}  # Update interval in seconds
     volumes:
       - ./data:/app/data  # Persist countdown data
     restart: unless-stopped

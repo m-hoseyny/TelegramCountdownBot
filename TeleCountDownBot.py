@@ -252,7 +252,7 @@ def create_countdown_job(application: Application, countdown_key: str) -> None:
     # Create new job
     application.job_queue.run_repeating(
         callback=lambda context: update_single_countdown(context, countdown_key),
-        interval=10,  # Update every 10 seconds
+        interval=os.environ.get('UPDATE_INTERVAL', 10),  # Update every 10 seconds
         first=1,  # Start after 1 second
         name=countdown_key
     )
