@@ -26,24 +26,24 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Conversation states
+# Constants
 WAITING_FOR_LINK = 1
 WAITING_FOR_TIME = 2
 WAITING_FOR_TEMPLATE = 3
 
-# Template placeholders
 TEMPLATE_PLACEHOLDERS = {
-    "{days}": "تعداد روز",
-    "{hours}": "تعداد ساعت",
-    "{minutes}": "تعداد دقیقه",
-    "{seconds}": "تعداد ثانیه"
+    '{days}': 'روز',
+    '{hours}': 'ساعت',
+    '{minutes}': 'دقیقه',
+    '{seconds}': 'ثانیه'
 }
 
-# JSON file to store countdown data
-DB_FILE = 'countdowns.json'
+# Database file path
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'countdowns.json')
 
 def load_countdowns():
     try:
+        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
         if os.path.exists(DB_FILE):
             with open(DB_FILE, 'r') as f:
                 data = json.load(f)
