@@ -6,6 +6,25 @@ import asyncio
 import json
 import re
 import os
+import logging
+import time
+from logging.handlers import RotatingFileHandler
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        RotatingFileHandler(
+            'bot.log',
+            maxBytes=1024*1024,  # 1MB
+            backupCount=5
+        ),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 # Conversation states
 WAITING_FOR_LINK = 1
@@ -24,14 +43,25 @@ TEMPLATE_PLACEHOLDERS = {
 DB_FILE = 'countdowns.json'
 
 def load_countdowns():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+    try:
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, 'r') as f:
+                data = json.load(f)
+                logger.info(f"Loaded {len(data)} countdowns from database")
+                return data
+        logger.warning("Countdown database not found, creating new one")
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading countdowns: {e}")
+        return {}
 
 def save_countdowns(countdowns):
-    with open(DB_FILE, 'w') as f:
-        json.dump(countdowns, f)
+    try:
+        with open(DB_FILE, 'w') as f:
+            json.dump(countdowns, f)
+            logger.info(f"Saved {len(countdowns)} countdowns to database")
+    except Exception as e:
+        logger.error(f"Error saving countdowns: {e}")
 
 def extract_message_info(message_link):
     pattern = r'https://t\.me/(?:c/(\d+)|([^/]+))/(\d+)'
@@ -102,7 +132,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: i
             return
             
     except Exception as e:
-        print(f"Error updating countdown {countdown_key}: {e}")
+        logger.error(f"Error updating countdown {countdown_key}: {e}")
         try:
             await context.bot.send_message(
                 chat_id=admin_chat_id,
@@ -138,6 +168,7 @@ def create_countdown_job(application: Application, chat_id: int, message_id: int
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.info(f"Starting new conversation with user {update.effective_user.id}")
     instructions = (
         " سلام! من یک ربات شمارش معکوس هستم.\n\n"
         "برای استفاده از من در کانال خود، لطفا مراحل زیر را دنبال کنید:\n"
@@ -154,6 +185,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(instructions)
 
 async def add_countdown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    logger.info(f"Starting new countdown conversation with user {update.effective_user.id}")
     await update.message.reply_text(
         "لطفاً لینک پیام کانال را ارسال کنید.\n"
         "مثال: https://t.me/channelname/123"
@@ -161,25 +193,32 @@ async def add_countdown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return WAITING_FOR_LINK
 
 async def handle_message_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message_link = update.message.text.strip()
-    message_info = extract_message_info(message_link)
-    
-    if not message_info:
-        await update.message.reply_text(" لینک پیام نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید.")
+    try:
+        message_link = update.message.text.strip()
+        logger.info(f"Received message link: {message_link}")
+        message_info = extract_message_info(message_link)
+        
+        if not message_info:
+            await update.message.reply_text(" لینک پیام نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید.")
+            return WAITING_FOR_LINK
+        
+        context.user_data['message_info'] = message_info
+        await update.message.reply_text(
+            "لطفاً تاریخ و زمان پایان را به صورت شمسی وارد کنید:\n"
+            "فرمت: YYYY-MM-DD HH:MM:SS\n"
+            "مثال: 1402-12-29 23:59:59"
+        )
+        return WAITING_FOR_TIME
+        
+    except Exception as e:
+        logger.error(f"Error processing message link: {e}")
+        await update.message.reply_text("لینک نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید")
         return WAITING_FOR_LINK
-    
-    context.user_data['message_info'] = message_info
-    await update.message.reply_text(
-        "لطفاً تاریخ و زمان پایان را به صورت شمسی وارد کنید:\n"
-        "فرمت: YYYY-MM-DD HH:MM:SS\n"
-        "مثال: 1402-12-29 23:59:59"
-    )
-    return WAITING_FOR_TIME
 
 async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    time_text = update.message.text.strip()
-    
     try:
+        time_text = update.message.text.strip()
+        
         # Parse Persian date
         date_parts, time_parts = time_text.split(' ')
         year, month, day = map(int, date_parts.split('-'))
@@ -205,6 +244,7 @@ async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return WAITING_FOR_TEMPLATE
         
     except Exception as e:
+        logger.error(f"Error processing target time: {e}")
         await update.message.reply_text(
             " فرمت تاریخ نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید.\n"
             "مثال صحیح: 1402-12-29 23:59:59"
@@ -212,25 +252,22 @@ async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return WAITING_FOR_TIME
 
 async def handle_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    template = update.message.text.strip()
-    
-    # Verify template contains all required placeholders
-    missing_placeholders = []
-    for placeholder in TEMPLATE_PLACEHOLDERS.keys():
-        if placeholder not in template:
-            missing_placeholders.append(f"{placeholder} ({TEMPLATE_PLACEHOLDERS[placeholder]})")
-    
-    if missing_placeholders:
-        await update.message.reply_text(
-            " قالب پیام باید شامل تمام متغیرها باشد. موارد زیر در پیام شما وجود ندارند:\n"
-            f"{', '.join(missing_placeholders)}\n\n"
-            "لطفاً دوباره تلاش کنید یا /cancel را بزنید."
-        )
-        return WAITING_FOR_TEMPLATE
-    
     try:
-        # Test template formatting
-        test_format = template.format(days=0, hours=0, minutes=0, seconds=0)
+        template = update.message.text.strip()
+        
+        # Verify template contains all required placeholders
+        missing_placeholders = []
+        for placeholder in TEMPLATE_PLACEHOLDERS.keys():
+            if placeholder not in template:
+                missing_placeholders.append(f"{placeholder} ({TEMPLATE_PLACEHOLDERS[placeholder]})")
+        
+        if missing_placeholders:
+            await update.message.reply_text(
+                " قالب پیام باید شامل تمام متغیرها باشد. موارد زیر در پیام شما وجود ندارند:\n"
+                f"{', '.join(missing_placeholders)}\n\n"
+                "لطفاً دوباره تلاش کنید یا /cancel را بزنید."
+            )
+            return WAITING_FOR_TEMPLATE
         
         chat_id, message_id = context.user_data['message_info']
         target_timestamp = context.user_data['target_timestamp']
@@ -253,6 +290,7 @@ async def handle_template(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(" شمارش معکوس با موفقیت شروع شد!")
         
     except Exception as e:
+        logger.error(f"Error processing template: {e}")
         await update.message.reply_text(
             " قالب پیام نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید."
         )
@@ -265,6 +303,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 def main() -> None:
+    logger.info("Starting bot...")
     TOKEN = os.environ.get('TOKEN')
     
     # Create application
@@ -289,14 +328,14 @@ def main() -> None:
     countdowns = load_countdowns()
     for countdown_key, data in countdowns.items():
         chat_id = data['chat_id']
+        admin_chat_id = data['admin_chat_id']
         message_id = data['message_id']
         target_timestamp = data['target_timestamp']
         template = data.get('template', "زمان باقی مانده:\n<code>{days} روز, {hours} ساعت, {minutes} دقیقه, {seconds} ثانیه</code>")
-        create_countdown_job(application, chat_id, message_id, target_timestamp, template)
+        create_countdown_job(application, chat_id, message_id, target_timestamp, template, admin_chat_id)
     
     # Start the bot
-    print("Starting bot...")
-    print(f"Loaded {len(countdowns)} existing countdowns")
+    logger.info(f"Loaded {len(countdowns)} existing countdowns")
     
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
