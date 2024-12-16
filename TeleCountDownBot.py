@@ -136,13 +136,15 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
                 await context.bot.edit_message_caption(
                     chat_id=chat_id,
                     message_id=message_id,
-                    caption=message_text
+                    caption=message_text,
+                    parse_mode='HTML'
                 )
             else:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text=message_text
+                    text=message_text,
+                    parse_mode='HTML'
                 )
         except Exception as e:
             if "no text in the message to edit" in str(e):
@@ -155,7 +157,8 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
                 await context.bot.edit_message_caption(
                     chat_id=chat_id,
                     message_id=message_id,
-                    caption=message_text
+                    caption=message_text,
+                    parse_mode='HTML'
                 )
             else:
                 raise  # Re-raise if it's a different error
@@ -176,7 +179,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
             if admin_chat_id:
                 await context.bot.send_message(
                     chat_id=admin_chat_id,
-                    text=f" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است. {e}"
+                    text=f" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است. \n{e}"
                 )
         except Exception as notify_error:
             logger.error(f"Failed to notify admin about error: {notify_error}")
@@ -241,7 +244,9 @@ async def handle_message_link(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "لطفاً تاریخ و زمان پایان را به صورت شمسی وارد کنید:\n"
             "فرمت: YYYY-MM-DD HH:MM:SS\n"
-            "مثال: 1402-12-29 23:59:59"
+            "مثال:\n"
+            "<code>1402-12-29 23:59:59</code>",
+            parse_mode='HTML'
         )
         return WAITING_FOR_TIME
         
@@ -274,7 +279,8 @@ async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "{days} روز و {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه"
             "\n"
             "تا شروع مسابقه"
-            "</code>"
+            "</code>",
+            parse_mode='HTML'
         )
         return WAITING_FOR_TEMPLATE
         
