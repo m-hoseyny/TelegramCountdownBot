@@ -126,15 +126,39 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
         target_timestamp = data['target_timestamp']
         template = data.get('template', "زمان باقی مانده:\n<code>{days} روز, {hours} ساعت, {minutes} دقیقه, {seconds} ثانیه</code>")
         admin_chat_id = data.get('admin_chat_id')
+        is_caption = data.get('is_caption', False)
         
         remaining_time = remaining_time_from_timestamp(target_timestamp)
         message_text = format_countdown_message(remaining_time, template)
         
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=message_text
-        )
+        try:
+            if is_caption:
+                await context.bot.edit_message_caption(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    caption=message_text
+                )
+            else:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=message_text
+                )
+        except Exception as e:
+            if "no text in the message to edit" in str(e):
+                # Update the countdown data to mark it as a caption message
+                countdowns = load_countdowns()
+                if countdown_key in countdowns:
+                    countdowns[countdown_key]['is_caption'] = True
+                    save_countdowns(countdowns)
+                # Retry with caption
+                await context.bot.edit_message_caption(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    caption=message_text
+                )
+            else:
+                raise  # Re-raise if it's a different error
         
         if remaining_time is None:
             # Time's up, stop the countdown
