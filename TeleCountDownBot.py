@@ -218,9 +218,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "6️⃣ قالب پیام را با استفاده از متغیرهای زیر وارد کنید:\n\n"
         f"{', '.join(TEMPLATE_PLACEHOLDERS.keys())}\n\n"
         "مثال تاریخ: 1402-12-29 23:59:59\n"
-        "مثال قالب پیام: {days} روز و {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه تا شروع مسابقه"
+        "مثال قالب پیام: {days} روز و {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه تا شروع مسابقه",
+        "\n\nبات از HTML ساپورت میکند!"
     )
-    await update.message.reply_text(instructions)
+    await update.message.reply_text(''.join(instructions), parse_mode='HTML')
 
 async def add_countdown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     logger.info(f"Starting new countdown conversation with user {update.effective_user.id}")
