@@ -1,3 +1,4 @@
+from math import e
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ConversationHandler, ContextTypes, filters
 from datetime import datetime, timezone, timedelta
@@ -76,6 +77,8 @@ def extract_message_info(message_link):
     # If numeric chat_id (private channel), add -100 prefix
     if chat_id.isdigit():
         chat_id = int(f"-100{chat_id}")
+    else:
+        chat_id = '@' + chat_id
     
     return chat_id, message_id
 
@@ -191,7 +194,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
                     caption=message_text,
                     parse_mode='HTML'
                 )
-            elif "message to edit not found" in error_msg:
+            elif "message to edit not found" in error_msg or 'chat not found' in error_msg:
                 logger.warning(f"Message not found for countdown {countdown_key}, removing from database")
                 # Remove the countdown from JSON
                 countdowns = load_countdowns()
