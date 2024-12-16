@@ -1,65 +1,214 @@
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
-
-from datetime import datetime
+from telegram.ext import Application, CommandHandler, MessageHandler, ConversationHandler, ContextTypes, filters
+from datetime import datetime, timezone, timedelta
 from persiantools.jdatetime import JalaliDateTime
+import asyncio
+import json
+import re
+import os
 
-def remaining_time_from_khayyam(year, month, day, hour, minute, second):
-    target_gregorian_datetime = JalaliDateTime(year, month, day, hour, minute, second).to_gregorian()
+# Conversation states
+WAITING_FOR_LINK = 1
+WAITING_FOR_TIME = 2
 
-    current_gregorian_datetime = datetime.now()
+# JSON file to store countdown data
+DB_FILE = 'countdowns.json'
 
-    remaining_time = target_gregorian_datetime - current_gregorian_datetime
+def load_countdowns():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, 'r') as f:
+            return json.load(f)
+    return {}
 
+def save_countdowns(countdowns):
+    with open(DB_FILE, 'w') as f:
+        json.dump(countdowns, f)
+
+def extract_message_info(message_link):
+    # Handle both private and public channel links
+    pattern = r'https://t\.me/(?:c/(\d+)|([^/]+))/(\d+)'
+    match = re.match(pattern, message_link)
+    
+    if not match:
+        return None
+        
+    chat_id = match.group(1) or match.group(2)
+    message_id = int(match.group(3))
+    
+    # If numeric chat_id (private channel), add -100 prefix
+    if chat_id.isdigit():
+        chat_id = int(f"-100{chat_id}")
+    
+    return chat_id, message_id
+
+def remaining_time_from_timestamp(target_timestamp):
+    current_time = datetime.now()
+    target_time = datetime.fromtimestamp(target_timestamp)
+    
+    remaining_time = target_time - current_time
+    
+    if remaining_time.total_seconds() <= 0:
+        return None
+    
     remaining_days = remaining_time.days
     remaining_hours, remainder = divmod(remaining_time.seconds, 3600)
     remaining_minutes, remaining_seconds = divmod(remainder, 60)
-
+    
     return remaining_days, remaining_hours, remaining_minutes, remaining_seconds
 
-#your persian Date time you want count here 
-future_khayyam_year = 1402
-future_khayyam_month = 12
-future_khayyam_day = 17
-future_khayyam_hour = 9
-future_khayyam_minute = 0
-future_khayyam_second = 0
+def format_countdown_message(remaining_time):
+    if remaining_time is None:
+        return " زمان به پایان رسید!"
+        
+    days, hours, minutes, seconds = remaining_time
+    return f"زمان باقی مانده: {days} روز, {hours} ساعت, {minutes} دقیقه, {seconds} ثانیه"
 
-remaining_days, remaining_hours, remaining_minutes, remaining_seconds = remaining_time_from_khayyam(
-    future_khayyam_year, future_khayyam_month, future_khayyam_day,
-    future_khayyam_hour, future_khayyam_minute, future_khayyam_second
-)
-
-
-def msg(remaining_days, remaining_hours, remaining_minutes, remaining_seconds):
+async def update_countdowns(context: ContextTypes.DEFAULT_TYPE) -> None:
+    countdowns = load_countdowns()
+    completed_countdowns = []
     
-    msg = f"🎈زمان باقی مانده تا مسابقه نهایی: {remaining_days} روز, {remaining_hours} ساغت, {remaining_minutes} دقیقه, {remaining_seconds} ثانیه\n"
-    return msg
+    for countdown_key, data in countdowns.items():
+        try:
+            chat_id = data['chat_id']
+            message_id = data['message_id']
+            target_timestamp = data['target_timestamp']
+            
+            remaining_time = remaining_time_from_timestamp(target_timestamp)
+            message_text = format_countdown_message(remaining_time)
+            
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=message_text
+            )
+            
+            if remaining_time is None:
+                completed_countdowns.append(countdown_key)
+                
+        except Exception as e:
+            print(f"Error updating countdown {countdown_key}: {e}")
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است."
+                )
+            except:
+                pass
+            completed_countdowns.append(countdown_key)
+    
+    # Remove completed countdowns
+    if completed_countdowns:
+        for key in completed_countdowns:
+            countdowns.pop(key, None)
+        save_countdowns(countdowns)
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    instructions = (
+        " سلام! من یک ربات شمارش معکوس هستم.\n\n"
+        "برای استفاده از من در کانال خود، لطفا مراحل زیر را دنبال کنید:\n"
+        "1️⃣ من را به کانال خود اضافه کنید\n"
+        "2️⃣ من را به عنوان ادمین کانال تنظیم کنید\n"
+        "3️⃣ یک پیام در کانال ارسال کنید و لینک پیام را کپی کنید\n"
+        "4️⃣ دستور /add_countdown را ارسال کنید و لینک پیام را برای من بفرستید\n"
+        "5️⃣ زمان پایان را به صورت تاریخ شمسی وارد کنید\n\n"
+        "مثال تاریخ: 1402-12-29 23:59:59"
+    )
+    await update.message.reply_text(instructions)
 
-TOKEN = "<YOUR_BOT_TOKEN>"
+async def add_countdown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(
+        "لطفاً لینک پیام کانال را ارسال کنید.\n"
+        "مثال: https://t.me/channelname/123"
+    )
+    return WAITING_FOR_LINK
 
-def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text('Hello! I am your bot. Send /time to get day count message.')
+async def handle_message_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    message_link = update.message.text.strip()
+    message_info = extract_message_info(message_link)
+    
+    if not message_info:
+        await update.message.reply_text(" لینک پیام نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید.")
+        return WAITING_FOR_LINK
+    
+    context.user_data['message_info'] = message_info
+    await update.message.reply_text(
+        "لطفاً تاریخ و زمان پایان را به صورت شمسی وارد کنید:\n"
+        "فرمت: YYYY-MM-DD HH:MM:SS\n"
+        "مثال: 1402-12-29 23:59:59"
+    )
+    return WAITING_FOR_TIME
 
-def time(update: Update, context: CallbackContext) -> None:
-    chat_id = update.message.chat_id
-    context.bot.send_message(chat_id, msg(*remaining_time_from_khayyam(
-    future_khayyam_year, future_khayyam_month, future_khayyam_day,
-    future_khayyam_hour, future_khayyam_minute, future_khayyam_second
-)))
+async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    time_text = update.message.text.strip()
+    
+    try:
+        # Parse Persian date
+        date_parts, time_parts = time_text.split(' ')
+        year, month, day = map(int, date_parts.split('-'))
+        hour, minute, second = map(int, time_parts.split(':'))
+        
+        # Convert to Gregorian timestamp
+        target_time = JalaliDateTime(year, month, day, hour, minute, second).to_gregorian()
+        target_timestamp = target_time.timestamp()
+        
+        chat_id, message_id = context.user_data['message_info']
+        countdown_key = f"{chat_id}_{message_id}"
+        
+        # Save to JSON
+        countdowns = load_countdowns()
+        countdowns[countdown_key] = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'target_timestamp': target_timestamp
+        }
+        save_countdowns(countdowns)
+        
+        await update.message.reply_text(" شمارش معکوس با موفقیت شروع شد!")
+        
+    except Exception as e:
+        await update.message.reply_text(
+            " فرمت تاریخ نامعتبر است. لطفاً دوباره تلاش کنید یا /cancel را بزنید.\n"
+            "مثال صحیح: 1402-12-29 23:59:59"
+        )
+        return WAITING_FOR_TIME
+    
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(" عملیات لغو شد.")
+    return ConversationHandler.END
 
 def main() -> None:
-    updater = Updater(TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+    TOKEN = os.environ.get('TOKEN')
+    
+    # Create application
+    application = Application.builder().token(TOKEN).build()
+    
+    # Add conversation handler
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('add_countdown', add_countdown)],
+        states={
+            WAITING_FOR_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_link)],
+            WAITING_FOR_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_target_time)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)
+    
+    # Add job to update countdowns every minute
+    job_queue = application.job_queue
+    job_queue.run_repeating(update_countdowns, interval=60, first=60)
+    
+    # Start the bot
+    print("Starting bot...")
+    
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("time", time))
-
-    updater.start_polling()
-
-    updater.idle()
-
-if __name__ == '__main__':
+def run_bot():
     main()
 
+if __name__ == '__main__':
+    run_bot()
