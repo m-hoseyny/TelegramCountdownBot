@@ -194,7 +194,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
                     caption=message_text,
                     parse_mode='HTML'
                 )
-            elif "message to edit not found" in error_msg or 'chat not found' in error_msg:
+            elif "message to edit not found" in error_msg or 'chat not found' in error_msg or 'message_id_invalid' in error_msg:
                 logger.warning(f"Message not found for countdown {countdown_key}, removing from database")
                 # Remove the countdown from JSON
                 countdowns = load_countdowns()
