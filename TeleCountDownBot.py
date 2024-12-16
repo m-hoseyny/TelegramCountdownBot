@@ -291,6 +291,7 @@ async def handle_message_link(update: Update, context: ContextTypes.DEFAULT_TYPE
             return WAITING_FOR_LINK
         
         context.user_data['message_info'] = message_info
+        context.user_data['message_link'] = message_link.strip()
         await update.message.reply_text(
             "لطفاً تاریخ و زمان پایان را به صورت شمسی وارد کنید:\n"
             "فرمت: YYYY-MM-DD HH:MM:SS\n"
@@ -362,7 +363,7 @@ async def handle_template(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         chat_id, message_id = context.user_data['message_info']
         target_timestamp = context.user_data['target_timestamp']
-        countdown_key = f"{chat_id}_{message_id}"
+        countdown_key = context.user_data['message_link']  # Use the original message link as key
         
         # Save to JSON
         countdowns = load_countdowns()
