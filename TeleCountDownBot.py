@@ -170,14 +170,18 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
                     chat_id=chat_id,
                     message_id=message_id,
                     caption=message_text,
-                    parse_mode='HTML'
+                    parse_mode='HTML',
+                    connect_timeout=10,
+                    write_timeout=10,
                 )
             else:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=message_text,
-                    parse_mode='HTML'
+                    parse_mode='HTML',
+                    connect_timeout=10,
+                    write_timeout=10,
                 )
         except Exception as e:
             error_msg = str(e).lower()
@@ -230,7 +234,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_
             if admin_chat_id:
                 await context.bot.send_message(
                     chat_id=admin_chat_id,
-                    text=f" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است. \n{e}",
+                    text=f" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است. \n{e}\n{countdown_key}",
                     parse_mode='HTML'
                 )
         except Exception as notify_error:
