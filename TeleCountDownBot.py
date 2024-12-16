@@ -76,7 +76,7 @@ def format_countdown_message(remaining_time, template):
         seconds=seconds
     )
 
-async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, target_timestamp: float, template: str) -> None:
+async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, target_timestamp: float, template: str, admin_chat_id: int) -> None:
     countdown_key = f"{chat_id}_{message_id}"
     
     try:
@@ -105,7 +105,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: i
         print(f"Error updating countdown {countdown_key}: {e}")
         try:
             await context.bot.send_message(
-                chat_id=chat_id,
+                chat_id=admin_chat_id,
                 text=" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است."
             )
         except:
@@ -120,7 +120,7 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: i
         for job in current_jobs:
             job.schedule_removal()
 
-def create_countdown_job(application: Application, chat_id: int, message_id: int, target_timestamp: float, template: str) -> None:
+def create_countdown_job(application: Application, chat_id: int, message_id: int, target_timestamp: float, template: str, admin_chat_id: int) -> None:
     """Create a new job for a countdown"""
     countdown_key = f"{chat_id}_{message_id}"
     
@@ -131,7 +131,7 @@ def create_countdown_job(application: Application, chat_id: int, message_id: int
     
     # Create new job
     application.job_queue.run_repeating(
-        callback=lambda context: update_single_countdown(context, chat_id, message_id, target_timestamp, template),
+        callback=lambda context: update_single_countdown(context, chat_id, message_id, target_timestamp, template, admin_chat_id),
         interval=10,  # Update every 10 seconds
         first=1,  # Start after 1 second
         name=countdown_key
@@ -196,7 +196,11 @@ async def handle_target_time(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "لطفاً قالب پیام را وارد کنید. از متغیرهای زیر استفاده کنید:\n"
             f"{', '.join(TEMPLATE_PLACEHOLDERS.keys())}\n\n"
             "مثال:\n"
-            "{days} روز و {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه تا شروع مسابقه"
+            "<code>"
+            "{days} روز و {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه"
+            "\n"
+            "تا شروع مسابقه"
+            "</code>"
         )
         return WAITING_FOR_TEMPLATE
         
@@ -238,12 +242,13 @@ async def handle_template(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             'chat_id': chat_id,
             'message_id': message_id,
             'target_timestamp': target_timestamp,
-            'template': template
+            'template': template,
+            "admin_chat_id": update.message.chat_id
         }
         save_countdowns(countdowns)
         
         # Create countdown job
-        create_countdown_job(context.application, chat_id, message_id, target_timestamp, template)
+        create_countdown_job(context.application, chat_id, message_id, target_timestamp, template, admin_chat_id=update.message.chat_id)
         
         await update.message.reply_text(" شمارش معکوس با موفقیت شروع شد!")
         
