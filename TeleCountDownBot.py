@@ -106,10 +106,27 @@ def format_countdown_message(remaining_time, template):
         seconds=seconds
     )
 
-async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, target_timestamp: float, template: str, admin_chat_id: int) -> None:
-    countdown_key = f"{chat_id}_{message_id}"
+def get_countdown_data(countdown_key):
+    """Get countdown data from JSON file"""
+    countdowns = load_countdowns()
+    return countdowns.get(countdown_key)
+
+async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, countdown_key: str) -> None:
+    """Update a single countdown message"""
+    logger.debug(f"Updating countdown: {countdown_key}")
     
     try:
+        data = get_countdown_data(countdown_key)
+        if not data:
+            logger.error(f"No data found for countdown {countdown_key}")
+            return
+
+        chat_id = data['chat_id']
+        message_id = data['message_id']
+        target_timestamp = data['target_timestamp']
+        template = data.get('template', "زمان باقی مانده:\n<code>{days} روز, {hours} ساعت, {minutes} دقیقه, {seconds} ثانیه</code>")
+        admin_chat_id = data.get('admin_chat_id')
+        
         remaining_time = remaining_time_from_timestamp(target_timestamp)
         message_text = format_countdown_message(remaining_time, template)
         
@@ -125,43 +142,37 @@ async def update_single_countdown(context: ContextTypes.DEFAULT_TYPE, chat_id: i
             if countdown_key in countdowns:
                 del countdowns[countdown_key]
                 save_countdowns(countdowns)
-            # Remove the job
-            current_jobs = context.job_queue.get_jobs_by_name(countdown_key)
-            for job in current_jobs:
-                job.schedule_removal()
+            
+            remove_countdown(context.application, countdown_key)
             return
             
     except Exception as e:
         logger.error(f"Error updating countdown {countdown_key}: {e}")
         try:
-            await context.bot.send_message(
-                chat_id=admin_chat_id,
-                text=" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است."
-            )
-        except:
-            pass
-        # Remove the failed countdown
-        countdowns = load_countdowns()
-        if countdown_key in countdowns:
-            del countdowns[countdown_key]
-            save_countdowns(countdowns)
-        # Remove the job
-        current_jobs = context.job_queue.get_jobs_by_name(countdown_key)
-        for job in current_jobs:
-            job.schedule_removal()
+            if admin_chat_id:
+                await context.bot.send_message(
+                    chat_id=admin_chat_id,
+                    text=f" خطا در بروزرسانی پیام شمارش معکوس. لطفاً مطمئن شوید که ربات ادمین کانال است. {e}"
+                )
+        except Exception as notify_error:
+            logger.error(f"Failed to notify admin about error: {notify_error}")
 
-def create_countdown_job(application: Application, chat_id: int, message_id: int, target_timestamp: float, template: str, admin_chat_id: int) -> None:
-    """Create a new job for a countdown"""
-    countdown_key = f"{chat_id}_{message_id}"
-    
-    # Remove any existing jobs for this countdown
+def remove_countdown(application: Application, countdown_key: str) -> None:
+    """Remove a countdown job"""
     current_jobs = application.job_queue.get_jobs_by_name(countdown_key)
     for job in current_jobs:
         job.schedule_removal()
+
+def create_countdown_job(application: Application, countdown_key: str) -> None:
+    """Create a new job for a countdown"""
+    logger.info(f"Creating job for countdown: {countdown_key}")
+    
+    # Remove existing jobs for this countdown
+    remove_countdown(application, countdown_key)
     
     # Create new job
     application.job_queue.run_repeating(
-        callback=lambda context: update_single_countdown(context, chat_id, message_id, target_timestamp, template, admin_chat_id),
+        callback=lambda context: update_single_countdown(context, countdown_key),
         interval=10,  # Update every 10 seconds
         first=1,  # Start after 1 second
         name=countdown_key
@@ -284,8 +295,8 @@ async def handle_template(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         }
         save_countdowns(countdowns)
         
-        # Create countdown job
-        create_countdown_job(context.application, chat_id, message_id, target_timestamp, template, admin_chat_id=update.message.chat_id)
+        # Create job for the countdown
+        create_countdown_job(context.application, countdown_key)
         
         await update.message.reply_text(" شمارش معکوس با موفقیت شروع شد!")
         
@@ -324,15 +335,12 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     
-    # Load existing countdowns and create jobs
+    # Load existing countdowns
     countdowns = load_countdowns()
-    for countdown_key, data in countdowns.items():
-        chat_id = data['chat_id']
-        admin_chat_id = data['admin_chat_id']
-        message_id = data['message_id']
-        target_timestamp = data['target_timestamp']
-        template = data.get('template', "زمان باقی مانده:\n<code>{days} روز, {hours} ساعت, {minutes} دقیقه, {seconds} ثانیه</code>")
-        create_countdown_job(application, chat_id, message_id, target_timestamp, template, admin_chat_id)
+    
+    # Create jobs for existing countdowns
+    for countdown_key in countdowns:
+        create_countdown_job(application, countdown_key)
     
     # Start the bot
     logger.info(f"Loaded {len(countdowns)} existing countdowns")
